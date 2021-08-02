@@ -1,0 +1,621 @@
+# YAML Configuration Settings
+
+
+## [配置类别分类](https://patroni.readthedocs.io/en/latest/dynamic_configuration.html#patroni-configuration)
+
+Patroni的配置主要存储在DCS中，主要存在三种类型的配置：
+
+- 动态配置
+
+  这些选项可以随时在DCS中配置，如果配置不是patroni启动时的加载配置，可以将修改异步应用到每个节点，随后重新加载，部分数据库参数需要重启才能生效，此类参数会在集群状态检查的结果中通过字段pending_restart显示。
+
+- 本地配置
+
+  此类配置需要在配置文件中定义，优先级高于动态配置。通过向patroni进程发送SIGHUP、通过命令patronictl reload执行REST-API请求。
+
+  本地配置文件可以是一个或者多个，按照字母排序加载，参数采取覆盖式加载，即同一个参数后加载的值生效。
+
+- 环境变量配置（不常用，不做介绍）
+
+  环境变量配置拥有最高的优先级，可以覆盖一些本地配置。
+
+
+
+## 配置文件分类
+
+Patroni集群涉及到多个配置文件，每个阶段的作用有所不同：
+
+集群动态配置加载顺序：
+
+1. DCS 正常读取
+
+2. DCS无法读取，将patroni.dynamic.json中配置恢复到DCS
+
+3. 以上都不可用情况下，读取patroni.yml中配置恢复到DCS
+
+   *<font color=red>注意：动态配置只有在集群初始化的时候会从patroni.yml中读取，后期进行DCS的修改，不会反向同步到patroni.yml文件中，也就是说patroni.yml中的动态配置会过期</font>*
+
+- patroni.yml
+
+  此文件中定义了Patroni集群所需要的各种行为参数。文件中主要包含两类参数：
+
+  动态配置参数（存储在DCS中的参数）：
+
+  		- 数据库参数
+  		- patroni agent参数
+
+  本地配置参数（除存储在DCS中的其他参数）：
+
+  - 全局参数
+  - 集群初始化引导参数
+
+  - 数据库参数
+  - watchdog
+  - tags
+
+  此文件可以通过环境变量`PATRONICTL_CONFIG_FILE`指定其所在位置，这样可以省略执行命令过程中指定`CLUSTER_NAME`的繁琐。默认位置`/etc/patroni/patroni.yml`。
+
+- patroni.dynamic.json
+
+  此文件存储在PGDATA目录下，用于转储DCS中的所有配置信息，且每个节点的PGDATA目录下都存在这个文件，当DCS中配置发生改变时patroni会自动转储DCS中配置到此文件，如果DCS配置丢失，patroni将会读取此文件恢复到DCS中。
+
+  ***关于DCS重载***
+
+  ​			*同一时刻：进程重启时间间隔<10s(大约)*
+
+  - 同一时刻所有Patroni进程发生了重启
+
+    可能会因为`Patroni.yml`文件配置滞后性导致`Patroni`和`PostgreSQL`配置发生改变。
+
+    Patroni会从优先选举为`Leader`节点的`patroni.dynamic.json`读取，然后从`patroni.yml`读取，读取到的配置同时会应用到`Patroni`和`PostgreSQL`。这种情况下如果`patroni.dynamic.json`文件也丢失，则会被重建。
+
+  - 同一时刻存在Patroni进程没有重启
+
+    Patroni始终可以保证`DCS`中配置信息的正确性。
+
+    根据测试看，`DCS`配置不是从配置文件`patroni.yml`和`patroni.dynamic.json`中读取的，更像是内存中有备份，直接加载到DCS中，这种情况下如果`patroni.dynamic.json`文件也丢失，则不会被重建。
+
+    
+
+- 数据库参数文件
+
+  pgsql参数文件默认加载顺序：
+
+  1. postgresql.base.conf（此文件引用在postgresql.conf开头位置）
+
+  2. postgresql.conf
+
+  3. postgresql.auto.conf
+
+  4. 使用-o -name=value执行的参数
+
+     
+
+## Patroni参数解释
+
+### [Global/General](https://patroni.readthedocs.io/en/latest/SETTINGS.html#global-universal)
+
+全局设置。
+
+```yaml
+# /etc/patroni/patroni.yml
+---
+scope: pgsql
+namespace: /service/
+name: pg
+...
+
+<scope>
+  默认值: pgsql
+  修改方式: patroni.yml
+  参数含义: 集群名称(即cluster_name)。
+
+<namespace>
+  默认值: /service/
+  修改方式: patroni.yml
+  参数含义: 集群动态配置存储在DCS(consul)中，以<namespace>作为键值前缀。
+  # 可以通过以下命令查看所有键值consul kv export.
+
+<name>
+  默认值: pg
+  修改方式: patroni.yml
+  参数含义: 当前节点的名称，也是节点在集群中的名称，需要保证集群全局唯一性，和hostname无关。
+```
+
+### [RestAPI](https://patroni.readthedocs.io/en/latest/SETTINGS.html#rest-api)
+
+指定Patroni RestAPI的配置。
+
+```yaml
+# /etc/patroni/patroni.yml
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: 10.37.129.3:8008
+  authentication:
+    username: postgres
+    password: "123456"
+  cafile: <ca file>
+  certfile: <cert>
+  keyfile: <key>
+  keyfile_password: <pass>
+  ciphers: "ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES128-GCM-SHA256:!SSLv1:!SSLv2:!SSLv3:!TLSv1:!TLSv1.1"
+  verify_client:
+  http_extra_headers:
+    'X-Frame-Options': 'SAMEORIGIN'
+    'X-XSS-Protection': '1; mode=block'
+    'X-Content-Type-Options': 'nosniff'
+  https_extra_headers:
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains'
+
+<listen>
+  默认值: 127.0.0.1:8080
+  修改方式: patroni.yml
+  参数含义: Patroni为使用RestAPI监听的地址和端口。也可以通过此监听地址为haproxy提供健康检查信息。
+
+<connect_address>
+  默认值: 127.0.0.1:8080
+  修改方式: patroni.yml
+  参数含义: IP 地址（或主机名）和端口，用于访问 Patroni 的REST API. 集群的所有成员都必须能够连接到这个地址。正常使用集群中此参数不能设置为localhost或者127.0.0.1。它可以作为 HTTP 健康检查的端点，也可以作为用户查询接口。以及由集群成员完成的健康检查在领导选举期间（例如，确定主节点是否仍在运行，或者是否有一个节点的 WAL 位置在执行查询的节点之前等等）connect_address 放在 DCS 中，从而可以将成员名称转换为地址以连接到其 REST API。
+
+<authentication> - 暂不明用途
+  修改方式: patroni.yml
+  参数含义: 基础认证，为不安全的RestAPI端点提供基础的保护。
+    
+<cafile>
+  修改方式: patroni.yml
+  参数含义: 指定客户端信任的根证书文件。
+
+<certfile>
+  修改方式: patroni.yml
+  参数含义: 指定pem格式的客户端证书，如果没有指定，API server将不使用SSL。
+
+<keyfile>
+  修改方式: patroni.yml
+  参数含义: 指定pem格式的私钥。
+
+<keyfile_password>
+  修改方式: patroni.yml
+  参数含义: 指定私钥的密码，如果私钥文件不带密码，则不指定。
+
+<verify_client>
+  - none: RestAPI不检查客户端证书
+  - required: 所有RestAPI调用都需要客户端证书
+  - optional: 所有不安全的RestAPI调用都需要客户端证书，此种情况只检查PUT、POST、PATCH和DELETE请求。
+  默认值: none
+  修改方式: patroni.yml
+  参数含义: 设定检查客户端证书的方式。
+    
+<ciphers>
+  修改方式: patroni.yml
+  参数含义: 指定允许使用的密码套件。
+    
+<http_extra_headers>
+  默认值: 无
+  修改方式: patroni.yml
+  参数含义: HTTP 标头让 REST API 服务器通过 HTTP 响应传递附加信息。
+
+<https_extra_headers>
+  默认值: 无
+  修改方式: patroni.yml
+  参数含义: HTTPS 标头让 REST API 服务器在启用 TLS 时通过 HTTP 响应传递附加信息。
+```
+
+### [Consul](https://patroni.readthedocs.io/en/latest/SETTINGS.html#consul)
+
+指定连接consul集群。
+
+```yaml
+# /etc/patroni/patroni.yml
+consul:
+  hosts: 127.0.0.1:8500
+  scheme: http
+  verify: false
+  cacert:
+  cert:
+  key:
+  dc: 
+  consistency: default
+  check: false
+  register_service: true
+  service_tags: 
+    - pg-cluster
+  service_check_interval: 15s
+
+<host>
+  默认值: 127.0.0.1:8500
+  修改方式: patroni.yml
+  参数含义: 指定连接DCS集群的IP:PORT。
+  
+<url>
+  默认值: http://127.0.0.1:8500
+  修改方式: patroni.yml
+  参数含义: 参数<host>和<url>指定一个即可，作用相同。
+  
+  注意: <host>和<url>都不指定的情况下，默认使用127.0.0.1:8500
+
+<port>
+  修改方式: patroni.yml
+  参数含义: port可以不指定。指定url或host即可。
+  
+<scheme>
+	默认值: http
+  修改方式: patroni.yml
+  参数含义: 指定http传输方式，如使用https，需要为DCS配置TLS加密。
+  
+<verify>
+  默认值: false
+  修改方式: patroni.yml
+  参数含义: 指定对于https请求是否验证ssl证书。
+  
+<cacert>
+  修改方式: patroni.yml
+  参数含义: 指定ca根证书文件/服务器证书。
+  
+<cert>
+  修改方式: patroni.yml
+  参数含义: 指定客户端证书。
+  
+<key>
+  修改方式: patroni.yml
+  参数含义: 指定客户端私钥，如果cert中包含key，则可以忽略指定此参数。
+  
+<dc>
+	修改方式: patroni.yml
+  参数含义: 指定要连接的datacenter，可以不指定，一般会使用默认的DC。
+  # 可以通过consul members查看DC
+
+<consistency>
+   - default: 默认在几乎所有情况下都是一致的，但是存在Leader重新选举的时刻可能读取旧的键值。
+   - consistent: 此种情况保证所有情况下都一致。需要领导者验证参与选举的端点明确当前的领导者。此种方式会增加读取延迟。
+   - stale: 允许任何服务器读取键值，即使没有Leader。意味着读取的值可能新旧不一致。
+  默认值: default
+  修改方式: patroni.yml
+  参数含义: consul的一致性模式。
+  # [详见consul API reference](https://www.consul.io/api/features/consistency)
+
+<check>
+	默认值: 无
+  修改方式: patroni.yml
+  参数含义: 用户consul会话的健康检查列表，默认情况下使用空列表。
+  
+<register_service>
+  默认值: false
+  修改方式: patroni.yml
+  参数含义: 是否注册服务到consul中，如果指定为true，会注册服务名=<scope>的服务到consul集群中。
+  
+<service_tags>
+  默认值: 无
+  修改方式: patroni.yml
+  参数含义: 给注册的服务添加的额外的静态标签，主要指节点的角色标签master、replica、standby-leader。
+  # 可以通过命令consul catalog services查看
+
+<service_check_interval>
+	默认值: 10s
+  修改方式: patroni.yml
+  参数含义: 对注册的服务执行健康检查的频率。
+```
+
+### [Ctl](https://patroni.readthedocs.io/en/latest/SETTINGS.html#ctl)
+
+安全设置。
+
+```yaml
+# /etc/patroni/patroni.yml
+ctl:
+  insecure: false # Allow connections to SSL sites without certs
+  cacert: 
+  certfile: 
+  keyfile: 
+  
+<insecure>
+  默认值: false
+  修改方式: patroni.yml
+  参数含义: 允许连接到RestAPI而无需验证SSL证书。
+  
+<cacert>
+  默认值: 无
+  修改方式: patroni.yml
+  参数含义: 指定带有CA_BUNDLE文件或带有可信CA证书的目录，以便RestAPI验证SSL证书时使用。如果没有提供，patroni 将使用为 REST API“cafile”参数提供的值
+
+<certfile>
+  默认值: 无
+  修改方式: patroni.yml
+  参数含义: 指定带有客户端证书的 PEM 格式的文件。如果没有提供，patroni 将使用为 REST API“certfile”参数提供的值。
+
+<keyfile>
+  默认值: 无
+  修改方式: patroni.yml
+  参数含义: 指定带有客户端密钥的 PEM 格式的文件。如果没有提供，pavictl 将使用为 REST API “keyfile”参数提供的值。
+```
+
+### [Log](https://patroni.readthedocs.io/en/latest/SETTINGS.html#log)
+
+集群日志设置。
+
+```yaml
+# /etc/patroni/patroni.yml
+log:
+  level: INFO
+  traceback_level: INFO
+  format: '%(asctime)s %(levelname)s: %(message)s'
+  dateformat: '%Y-%m-%d %H:%M:%S %z'
+  max_queue_size: 1000
+  dir: /tmp/
+  file_num: 10
+  file_size: 10485760
+  
+<level>
+  默认值: INFO
+  修改方式: patroni.yml
+  参数含义: 设置日志输出级别，可选值CRITICAL/ERROR/WARNING/INFO/DEBUG/NOTSET。
+  
+<traceback_level>
+  默认值: ERROR
+  修改方式: patroni.yml
+  参数含义: 设置traceback日志的可见级别，如果设置为DEBUG，log.level也需要设置为DEBUG。
+  
+<format>
+  默认值: '%(asctime)s %(levelname)s: %(message)s'
+  修改方式: patroni.yml
+  参数含义: 设置日志输出的格式。
+  # [详见](the LogRecord attributes](https://docs.python.org/3.6/library/logging.html#logrecord-attributes)
+  
+<dateformat>
+  默认值: '%Y-%m-%d %H:%M:%S %z'
+  修改方式: patroni.yml
+  参数含义: 日志日期前缀的格式。
+  
+<max_queue_size>
+  默认值: 1000
+  修改方式: patroni.yml
+  参数含义: 日志缓存队列容纳的最大日志条目。1000条日志记录大约可以维持1h20m。
+  
+<dir>
+  默认值: /var/log/messages
+  修改方式: patroni.yml
+  参数含义: 日志存放路径，如不指定默认重定向到系统日志/var/log/messages，存放日志的目录需要手动创建。
+  
+<file_num>
+	默认值: 5
+  修改方式: patroni.yml
+  参数含义: 保留的日志文件个数。
+  
+<file_size> - 待测试
+	默认值: 
+  修改方式: patroni.yml
+  参数含义: 指定日志文件的最大值。达到最大值后进行归档，如果达到日志数量上限，日志文件会循环覆盖。
+```
+
+### [bootstrap](https://patroni.readthedocs.io/en/latest/SETTINGS.html#bootstrap-configuration)
+
+集群初始化引导设置。
+
+```yaml
+# /etc/patroni/patroni.yml
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    maximum_lag_on_syncnode: 
+    max_timeline_history: 
+    master_start_timeout: 60
+    master_stop_timeout: 60
+    synchronous_mode: false
+    synchronous_mode_strict: false
+    synchronous_node_count: 1
+    standby_cluster:
+      host: 127.0.0.1
+      port: 1111
+      primary_slot_name: patroni
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        wal_level: hot_standby
+        hot_standby: "on"
+        max_connections: 100
+        max_worker_processes: 8
+        wal_keep_segments: 8
+        max_wal_senders: 10
+        max_replication_slots: 10
+        max_prepared_transactions: 0
+        max_locks_per_transaction: 64
+        wal_log_hints: "on"
+        track_commit_timestamp: "off"
+        archive_mode: "on"
+        archive_timeout: 1800s
+        archive_command: mkdir -p ../wal_archive && test ! -f ../wal_archive/%f && cp %p ../wal_archive/%f      
+        
+    slots:
+      my_slot_name:
+        type: 
+    ignore_slots:
+      ig_my_slot_name: 
+        type: 
+
+  method: initdb
+
+  initdb:  
+  - encoding: UTF8
+  - data-checksums
+
+  pg_hba:
+    # "local" is for Unix domain socket connections only
+    - local   all             all                                     trust
+    # IPv4 local connections:
+    - host    all             all             127.0.0.1/32            trust
+    # IPv6 local connections:
+    - host    all             all             ::1/128                 trust
+    # Allow replication connections from localhost
+    - local   replication     all                                     trust
+    - host    replication     all             127.0.0.1/32            trust
+    - host    replication     all             ::1/128                 trust
+    # Allow replication connection from subnet 
+    - host    replication     replicator      10.37.129.0/24          md5
+    # Allow other connections
+    - host    all             all             10.37.129.0/24          md5
+
+  users:
+    admin:
+      password: admin
+      options:
+        - createrole
+        - createdb
+
+  post_init: /usr/local/bin/setup_cluster.sh
+  
+<dcs>
+	动态参数配置。仅有此部分数据存储在DCS中。
+
+<method>
+  默认值: initdb
+  修改方式: patroni.yml
+  参数含义: 初始化数据库的方式，调用pgsql命令initdb。
+  
+<initdb>
+  修改方式: patroni.yml
+  参数含义: 指定数据库初始化的选项，data_checksums、encoding、locale等。仅每次初始化集群时有效。
+
+<pg_hba>
+修改方式: patroni.yml
+参数含义: 指定鉴权文件的内容(pg_hba.conf)，只在引导集群初始化时有效。此处配置会被[PostgreSQL]部分的<pg_hba>覆盖。
+
+<users>
+  修改方式: patroni.yml
+  参数含义: 指定数据库初始化时需要创建的用户。仅每次初始化集群时有效，在数据库初始化后，[PostgreSQL]参数部分的superuser/replication/rewind用户都会被创建，但如果需要额外的其他管理用户可以通过此参数执行。
+  
+<post_init> or <post_bootstrap>
+  修改方式: patroni.yml
+  参数含义: 集群初始化后需要执行的操作，需要自定义。
+```
+
+#### bootstrap dcs基础参数
+
+```yaml
+# dcs部分参数解释
+<ttl>
+  默认值: 30
+  修改方式: DCS
+  参数含义: 获取Leader锁的 TTL（以秒为单位）。将其视为启动自动故障转移过程之前的时间长度。如果<ttl>秒内没有更新持锁信息，会触发重新选举。
+
+<loop_wait>
+  默认值: 10
+  修改方式: DCS
+  参数含义: Patroni进程健康检查循环将休眠的秒数。即每<loop_wait>秒Patroni进程进行一次集群健康检查。
+
+<retry_timeout>
+  默认值: 10
+  修改方式: DCS
+  参数含义: DCS 和 PostgreSQL 操作重试的超时时间（以秒为单位）。DCS或网络问题低于这个时间不会导致Patroni降级Leader。
+
+  遵循规则: ttl >= loop_wait + retry_timeout * 2
+
+<maximum_lag_on_failover>
+  默认值: 1048576 bytes
+  修改方式: DCS
+  参数含义: 当某个备节点流复制延迟超过1MB,将不会参与Leader选举，由剩余的节点参与选举。
+
+<maximum_lag_on_syncnode>
+  默认值: -1 bytes
+  修改方式: DCS
+  参数含义: 当同步副本复制延迟超过<maximum_lag_on_syncnode>时,将会触发同步副本的转换，当前同步副本会转换为异步同步，由LSN最新的异步副本转换为同步副本。此参数慎重设置。当指定值<0时(包含-1)，不会触发同步节点切换。
+
+<max_timeline_history>
+  默认值: 0
+  修改方式: DCS
+  参数含义: DCS中保存的最大时间线历史项目数。默认值: 0。当设置为0时，它会在DCS中保留完整的历史记录。每发生一次主备切换，timeline+1，数据库可以根据不同的timeline恢复到不同的lsn，值设置越大，需要保留的归档日志就需要更多。
+  # 可以通过以下命令查看timeline产生的时间 consul kv get pg/<cluster_name>/history|tr '[' '\n'
+
+<master_start_timeout>
+  默认值: 10
+  修改方式: DCS
+  参数含义: 在触发故障转移之前允许主服务器从故障中恢复的时间（以秒为单位）。当设置不为0且为异步复制时，切换最大延迟为loop_wait+master_start_timeout+loop_wait，如果设置为0且为异步复制时，切换最大延迟为loop_wait，但是可能会导致数据丢失。
+
+<master_stop_timeout>
+  默认值: 30
+  修改方式: DCS
+  参数含义: Patroni停止Postgres时允许等待的秒数。当master_stop_timeout > 0 并且synchronous_mode = true时，如果停止操作的运行时间超过了master_stop_timeout设置的值，则Patroni会向postmaster发送SIGKILL。
+
+# 参数设置不当可能会导致集群不可用 示例：
+# 这种情况的发生可以通过设置参数 maximum_lag_on_syncnode 来在一定程度上面避免，因为此参数默认为-1，即不会发生同步复制节点(Sync Standby状态节点)的切换。
+一个大事务发生正在执行，同步副本可能会发生复制延迟（例如遭遇网络故障），如果此时Leader因为停止超时被强制KILL，会使同步副本停留在复制延迟的状态，根据同步模式下只有主节点和同步副本可以参与选举的规则，此时集群将处于不可用状态。
+会产生如下的状态：
+-- pg-test-1已经被停止超时强制KILL
++ Cluster: pg-test (6974683872880828351) --+---------+----+-----------+-------------+
+| Member    | Host          | Role         | State   | TL | Lag in MB | Tags        |
++-----------+---------------+--------------+---------+----+-----------+-------------+
+| pg-test-2 | 172.16.97.132 | Replica      | running |  4 |         0 | clone: true |
+| pg-test-3 | 172.16.97.133 | Sync Standby | running |  4 |       254 | clone: true |
++-----------+---------------+--------------+---------+----+-----------+-------------+
+
+<synchronous_mode>
+  默认值: false
+  修改方式: DCS
+  参数含义: 打开同步复制模式。在这种模式下，一个副本将被选择为同步副本，只有最新的领导者和同步副本才能参与领导者选举。同步模式确保成功提交的事务不会在故障转移时丢失，代价是在 Patroni 无法确保事务持久性时丢失写入可用性。
+  如果启用同步复制，请务必保证同步复制节点的稳定性、网络的稳定性，否则复制延迟可能会导致Leader不可用。
+
+<synchronous_mode_strict>
+  默认值: false
+  修改方式: DCS
+  参数含义: 如果没有可用的同步副本，则防止禁用同步复制，从而阻止所有客户端写入主服务器。此种情况适用于备节点全部丢失或者指定了 nosync=true 。此设置可以防止同步副本丢失时主库不可用的情况发生，此时主库会自动转换为异步复制状态。
+
+<synchronous_node_count>
+  默认值: 1
+  修改方式: DCS
+  参数含义: 定义同步副本的数量，默认为1。根据情况进行修改，不要超过所有副本的数量。
+
+正确使用同步副本
+1. synchronous_mode=true  # 启用同步复制模式（启用同步副本）
+2. synchronous_mode_strict=false  # 同步复制不可用时切换为异步复制（无可用同步副本）
+3. maximum_lag_on_syncnode=<value>  # 同步副本延迟高于<value>时，切换延迟低的副本为同步副本
+
+<standby_cluster>
+  修改方式: patroni.yml
+  参数含义: 引导一个备用patroni pgsql集群。详见[Standby cluster]。
+
+<slots>
+  默认值: 无
+  修改方式: patroni.yml
+  参数含义: 定义永久复制槽，这里定义的复制槽在发生主备切换时不会丢失，patroni使用物理复制槽
+    - physical (pg_create_physical_replication_slot() 用于流复制)
+    - logical  (pg_create_logical_replication_slot() 用于逻辑复制)
+  # 动态创建 patronictl edit-config -s slots.my_slot.type=physical
+  # 查看创建的slots SQL> select slot_name,slot_type from pg_replication_slots;
+
+<ignore_slots>
+  默认值: 无
+  修改方式: patroni.yml
+  参数含义: 忽略指定的复制槽。作用是如果存在手动自行创建的复制槽，通过忽略的方式可以防止复制槽的丢失重建。
+  # 动态创建 patronictl edit-config -s ignore_slots.name.type=physical
+```
+
+#### bootstrap dcs数据库参数
+
+```yaml
+<pg_rewind>  默认值: false  修改方式: DCS  参数含义: pg_rewind是PostgreSQL流复制内置功能，通过复制发生timeline变化时间点以来的数据变化，更快速的实现备库的在线。此参数需要启用数据库参数full_pages_writes、wal_log_hint、data_checksums，后两个参数启用任一即可。<use_slots>  默认值: true  修改方式: DCS  参数含义: 复制槽可以防止WAL日志在没有正常在备库应用时被删除，是一种流复制保护机制。<parameters># [详见](https://gitlab_cn.gitlab.io/handbook/resources/handson_labs/installation/install_gitlab_pgsql_params_introduce.html)<recovery_conf>  修改方式: DCS  参数含义: 指定使用非initdb初始化数据库用户从备份或者其他操作恢复数据库的命令。此配置会被postgresq.recovery_conf覆盖。  # 示例  bootstrap:    method: <custom_bootstrap_method_name>    <custom_bootstrap_method_name>:        command: <path_to_custom_bootstrap_script> [param1 [, ...]]        keep_existing_recovery_conf: false        no_params: false        recovery_conf:            recovery_target_action: promote            recovery_target_timeline: latest            restore_command: <method_specific_restore_command>
+```
+
+### [PostgreSQL](https://patroni.readthedocs.io/en/latest/SETTINGS.html#postgresql)
+
+数据库设置。
+
+```yaml
+# 以下参数为本地配置，不会加载到DCS中，此部分参数后期修改需要重启patroni# /etc/patroni/patroni.ymlpostgresql:  listen: 127.0.0.1:5432  connect_address: 127.0.0.1:5432  data_dir: /var/lib/pgsql/12/data  bin_dir: /usr/pgsql-12/bin  config_dir: /var/lib/pgsql/12/data  pgpass: /var/lib/pgsql/12/.pgpass  custom_conf: /var/lib/pgsql/my_custom.conf                     create_replica_method: basebackup  basebackup:    - max-rate: '1000M'    - checkpoint: fast    - status-interval: 1s    - verbose    - progress    - waldir: /pg-wal-mount/external-waldir  use_unix_socket: true  use_unix_socket_repl: true  pg_ctl_timeout: 30  use_pg_rewind: true  remove_data_directory_on_rewind_failure: false  remove_data_directory_on_diverged_timelines: false  parameters:    logging_collector: "on"    log_filename: "postgresql-%Y-%m-%d.log"    log_statement: "all"    log_replication_commands: "on"    log_timezone: "PRC"    timezone: "Asia/Shanghai"  authentication:    replication:      username: replicator      password: rep-pass      sslmode:      sslkey:      sslpassword:      sslcert:      sslrootcert:      sslcrl:      gssencmode:      channel_binding:    superuser:      username: postgres      password: zalando    rewind:      username: rewind_user      password: rewind_password  pg_hba:    # "local" is for Unix domain socket connections only    - local   all             all                                     trust    # IPv4 local connections:    - host    all             all             127.0.0.1/32            trust    # IPv6 local connections:    - host    all             all             ::1/128                 trust    # Allow replication connections from localhost    - local   replication     all                                     trust    - host    replication     all             127.0.0.1/32            trust    - host    replication     all             ::1/128                 trust    # Allow replication connection from subnet     - host    replication     replicator      10.37.129.0/24          scram-sha-256    # Allow other connections    - host    all             all             10.37.129.0/24          scram-sha-256      pg_ident:    - gitlab git gitlab  pre_promote: /path/to/pre_promote.sh  callbacks:     on_reload: /bin/bash /etc/patroni/reload.sh    on_restart: /bin/bash /etc/patroni/restart.sh    on_role_change: /bin/bash /etc/patroni/role_change.sh    on_start: /bin/bash /etc/patroni/start.sh    on_stop: /bin/bash /etc/patroni/stop.sh    <listen>  默认值: localhost:5432  修改方式: patroni.yml  参数含义: 数据库监听的地址端口，一般配置为0.0.0.0:5432，可以通过都好分割填写多个地址，Patroni默认使用第一个地址建立连接。可以允许其他节点通过此监听地址访问到数据库。  示例：（端口号仅需要在最后指定）  listen:    192.168.56.101,192.168.56.172:5432<connect_address>  默认值: localhost:5432  修改方式: patroni.yml  参数含义: 通过此参数连接到初始化后的数据库。<data_dir>  默认值: 无  修改方式: patroni.yml  参数含义: 数据库PGDATA用来存放数据文件的目录，可以使用已经存在的目录，也可以使用数据库初始化后生成的目录。  <bin_dir>  默认值: 无  修改方式: patroni.yml  参数含义: Pgsql数据软件主程序安装目录，Patroni调用此路径下pgsql命令进行一系列维护操作。  <config_dir>  默认值: PGDATA  修改方式: patroni.yml  参数含义: 存放数据库配置文件的目录，默认存放于数据文件目录下，保持默认即可。  <pgpass>默认值: 无  修改方式: patroni.yml  参数含义: .pgpass密码文件的路径。Patroni在执行pg_basebackup、post_init脚本之前创建这个文件。该位置必须可由Patroni写入。  <custom_conf>  默认值: postgresql.base.conf  修改方式: patroni.yml  参数含义: 此参数在未指定的情况下，默认为PGDATA目录下的postgresql.base.conf文件，如果单独指定了新的文件，新的文件将会替代postgresql.base.conf文件。此文件默认PGDATA目录下的postgresql.conf文件的第一行通过include参数引用，bootstrap中的postgresql参数在集群初始化后都会写入到postgresql.conf中，因此<custom_conf>可以被其他参数覆盖。<create_replica_method>  默认值: basebackup  修改方式: patroni.yml  参数含义: 默认调用pg_basebackup创建备库。可以指定其他方式，例如pgbackrest备份工具等。但是一般情况下pg_basebackup即可。可以省去繁琐的维护操作。  # [详细](https://patroni.readthedocs.io/en/latest/replica_bootstrap.html#custom-replica-creation)  # 示例  postgresql:    create_replica_methods:        - wal_e        - basebackup    wal_e:        command: patroni_wale_restore        no_master: 1        envdir: {{WALE_ENV_DIR}}        use_iam: 1    basebackup:        max-rate: '100M'    或者    postgresql:    create_replica_methods:        - pgbackrest        - basebackup    pgbackrest:        command: /usr/bin/pgbackrest --stanza=<scope> --delta restore        keep_data: True        no_params: True    basebackup:        max-rate: '100M'        <use_unix_socket>  默认值: false  修改方式: patroni.yml  参数含义: 指定参数是否使用socket连接到数据库，如果指定为TRUE，默认会使用DCS中unix_socket_directories连接到数据，如果unix_socket_directories未指定，Patroni默认使用host的方式连接到数据库。<use_unix_socket_repl>  默认值: false  修改方式: patroni.yml  参数含义: 指定Patroni使用unix套接字进行复制用户集群连接。默认值为false。<pg_ctl_timeout>  默认值: 30，单位s  修改方式: patroni.yml  参数含义: pg_ctl执行start，stop或restart时的超时时间，超时即执行失败。<use_pg_rewind>  默认值: false  修改方式: patroni.yml  参数含义: 当它作为副本加入集群时，尝试在前领导者上使用 pg_rewind。  <remove_data_directory_on_rewind_failure>  默认值: false  修改方式: patroni.yml  参数含义: 如果启用此选项，Patroni执行pg_rewind失败的时候，将删除 PostgreSQL数据目录(PGDATA)并重新创建副本。否则它会尝试跟随新的领导者。  <remove_data_directory_on_diverged_timelines>  默认值: false  修改方式: patroni.yml  参数含义: 如果Patroni注意到timeline发生改变，并且以前的master无法从master开始流式传输，则Patroni将删除PostgreSQL 数据目录并重新创建副本。此选项在pg_rewind无法使用时很有用。  <patameters>  修改方式: patroni.yml  参数含义: 指定数据库参数，优先级高于bootstrap.dcs.postgresql.parameters部分。  <authentication>  superuser: 定义数据库超级用户    username: 超级用户名，用于初始化数据库和后面patroni用来管理postgres。    password: 超级用户的密码，数据库初始化后自动设置。    sslmode: ssl验证方式，详细如下。[映射PostgreSQL参数 - sslmode]      - https://www.postgresql.org/docs/current/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS      - disable 只尝试非SSL连接      - allow 首先尝试非SSL连接；如果失败，尝试SSL连接      - prefer (默认)首先尝试SSL连接；如果失败，尝试非SSL连接      - require 只尝试SSL连接。如果存在根 CA 文件，按照与verify-ca指定相同的方式验证证书      - verify-ca 仅尝试SSL连接，并验证服务器证书是否由受信任的证书颁发机构 ( CA )颁发      - verify-full 仅尝试SSL连接，验证服务器证书是否由受信任的CA颁发，并且请求的服务器主机名与证书中的主机名匹配    sslkey: 指定密钥文件。[映射PostgreSQL参数 - sslkey]    sslpassword: 如果私钥设置了密码，此处指定私钥的密码。[映射PostgreSQL参数 - sslpassword]    sslcert: 指定客户端证书。[映射PostgreSQL参数 - sslcert]    sslrootcert: 指定ca根证书，用以验证服务器。[映射PostgreSQL参数 - sslrootcert]    sslcrl: 指定吊销的证书列表。[映射PostgreSQL参数 - sslurl]    gssencmode: 确定以何种优先级于服务器简历GSS TCP/IP连接。 [映射PostgreSQL参数 - gssencmode]      - disable 只尝试非GSSAPI加密的连接      - prefer (默认)如果存在GSSAPI凭证，则尝试建立GSSAPI加密的连接，如果没有则建立非加密连接。      - require 只尝试GSSAPI加密连接    channel_binding: 此选项控制客户端对通道绑定的使用。暂未了解。      - https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-CHANNEL-BINDING  replication: 定义用于流复制的用户    同上  rewind: 定义执行pg_rewind的用户    同上<pg_hba>  修改方式: patroni.yml  参数含义: Patroni用来生成pg_hba.conf，优先级高于bootstrap.pg_hba，如果同时指定，则bootstrap.pg_hba会被覆盖。  <pg_ident>  修改方式: patroni.yml  参数含义: 指定鉴权映射文件的内容(pg_ident.conf)，创建用户映射关系，限制操作系统用户登录到数据库，gitlab中默认映射了git系统用户到数据库gitlab用户。  示例：  bootstrap:    pg_ident:      - mapname1 systemname1 pguser1      - mapname2 systemname2 pguser2      <pre_promote>  默认值: 无  修改方式: patroni.yml  参数含义: 在获取领导者锁之后但在提升副本之前的故障转移期间执行的防护脚本。如果脚本以非零代码退出，则 Patroni 不会提升副本并从 DCS 中删除领导密钥。  <callbacks>  - on_reload: 触发配置重新加载时运行此脚本。  - on_restart: 当 postgres 重新启动时运行这个脚本（不改变角色）。  - on_role_change: 当 postgres 被提升或降级时运行这个脚本。  - on_start: 在 postgres 启动时运行此脚本。  - on_stop: 当 postgres 停止时运行这个脚本。  修改方式: patroni.yml  参数含义: 通过内置的触发动作执行一系列动作。可以通过此参数实现VIP功能
+```
+
+### [Watchdog](https://patroni.readthedocs.io/en/latest/SETTINGS.html#watchdog)
+
+```yaml
+# /etc/patroni/patroni.ymlwatchdog:  mode: off  device: /dev/watchdog  safety_margin: 5  <mode>  - off: 不使用watchdog。  - automatic: 如果可用就使用，如果不可用则忽略。  - required: 如果watchdog不可用，则此节点不能选举为主节点  默认值: 无  修改方式: patroni.yml  参数含义:   <device>  默认值: /dev/watchdog  修改方式: patroni.yml  参数含义: 指定watchdog设备位置，linux默认为/dev/watchdog,/dev/watchdog0。  <safety_margin>  默认值: none，单位s  修改方式: patroni.yml  参数含义: 触发watchdog和Leader key到期之间的宽裕时间。
+```
+
+### [Tags](https://patroni.readthedocs.io/en/latest/SETTINGS.html#tags)
+
+```yaml
+# /etc/patroni/patroni.ymltags:    nofailover: false    noloadbalance: false    replicatefrom: false    clonefrom: false    nosync: false<nofailover>  默认值: false  修改方式: patroni.yml  参数含义: 控制是否允许此节点参与选举并成为领导者，如果指定为true，那么此节点将永远不会被选举为Leader  <noloadbalance>  默认值: false  修改方式: patroni.yml  参数含义: 如果设置true为该节点，则将为REST API 健康检查(GET /replica)返回 HTTP 状态代码 503 ，将此节点从负载均衡中排除。  <replicatefrom>  默认值: false  修改方式: patroni.yml  参数含义: 用于指定级联复制的上游数据库，可以使用1:1:1的级联复制模式，而不是1:2的复制模式。可以节约Leader的资源消耗。  <clonefrom>	默认值: false  修改方式: patroni.yml  参数含义: 如果设置为true，其他节点则可能更倾向将此节点用于引导程序（pg_basebackup取自）。如果有多个节点的clonefrom标签设置为true，则将随机选择。<nosync>  默认值: false  修改方式: patroni.yml  参数含义: 指定此节点是否允许成为同步副本，如果指定为true，则此节点永远不是成为同步副本。
+```
+
+
+
