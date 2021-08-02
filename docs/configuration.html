@@ -27,20 +27,11 @@
     <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <div id="content"></div>
-    
-    <div id="content-wrapper" style="display:block; width:200px">
-      <div class="inner clearfix">
-        <section id="main-content">
-          <h1 id="xiangmas-blog">XiangMa’s Blog</h1>
-          <script>
-            $.get('./configuration.md', function(response, status, xhr){
-              $("#content").html(marked(response));
-            });
-          </script>
-       
-        </section>
-      </div>
-    </div>
-
+      <script>
+        $.get('./configuration.md', function(response, status, xhr){
+          $("#content").html(marked(response));
+        });
+      </script>
+   
   </body>
 </html>
