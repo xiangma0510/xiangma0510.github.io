@@ -57,12 +57,6 @@
     <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <div id="content"></div>
-
-    <script>
-      $.get('../docs/patroni_introduction.md', function(response, status, xhr){
-        $("#content").html(marked(response));
-      });
-    </script>
     
     <div id="content-wrapper">
       <div class="inner clearfix">
