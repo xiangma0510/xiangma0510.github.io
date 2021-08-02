@@ -27,7 +27,7 @@
     <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <div id="content"></div>
-      <script class="inner">
+      <script style="display:block; height:100px; width:100px">
         $.get('./configuration.md', function(response, status, xhr){
           $("#content").html(marked(response));
         });
