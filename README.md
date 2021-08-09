@@ -103,10 +103,7 @@ PostgreSQL HA三种常见的解决方案PAF（PostgreSQL Automatic Failover）�
 
 
 
-## 架构示意图
-
-![img](../images/architecture.svg)
-<div align=center>图片引用自项目Vonng/pigsty</div>
+## 组件介绍
 
 - **DCS**
 
